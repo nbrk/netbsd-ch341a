@@ -1,0 +1,15 @@
+Index: Makefile
+===================================================================
+RCS file: /pub/NetBSD-CVS/src/sys/modules/Makefile,v
+retrieving revision 1.300
+diff -u -r1.300 Makefile
+--- Makefile	20 Feb 2026 07:54:26 -0000	1.300
++++ Makefile	8 May 2026 13:13:32 -0000
+@@ -195,6 +195,7 @@
+ SUBDIR+=	tmpfs
+ SUBDIR+=	ualea
+ SUBDIR+=	uatp
++SUBDIR+=	uchepp
+ SUBDIR+=	udf
+ SUBDIR+=	ufs
+ SUBDIR+=	umap

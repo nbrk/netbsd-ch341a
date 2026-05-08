@@ -1,0 +1,22 @@
+Index: files.usb
+===================================================================
+RCS file: /pub/NetBSD-CVS/src/sys/dev/usb/files.usb,v
+retrieving revision 1.186
+diff -u -r1.186 files.usb
+--- files.usb	7 Dec 2025 10:05:10 -0000	1.186
++++ files.usb	8 May 2026 13:12:14 -0000
+@@ -474,6 +474,14 @@
+ attach	uchcom at usbdevif
+ file	dev/usb/uchcom.c		uchcom
+ 
++# QinHeng/WinChipHead CH341A EPP mode driver
++device	uchepp: gpiobus
++attach	uchepp at usbdevif
++file	dev/usb/uchepp.c		uchepp
++file	dev/usb/uchepp_usb.c	uchepp
++file	dev/usb/uchepp_gpio.c	uchepp
++file	dev/usb/uchepp_iic.c	uchepp
++
+ # Avision SCSI over USB, HP5300
+ device	usscanner: scsi
+ attach	usscanner at usbdevif
