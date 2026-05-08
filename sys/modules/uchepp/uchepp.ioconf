@@ -1,1 +1,10 @@
-/netbsd_root/usr/src/sys/modules/uchepp/uchepp.ioconf
+ioconf uchepp
+
+include "conf/files"
+include "dev/usb/files.usb"
+
+pseudo-root uhub*
+
+#uchepp* at uhub? port ? configuration ? interface ?
+uchepp* at uhub? port ?
+
