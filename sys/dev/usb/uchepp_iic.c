@@ -28,13 +28,13 @@
 #include <dev/usb/ucheppvar.h>
 
 /* Chip I2C commands (bulk) */
-#define UCHEPP_CMD_I2C_STM_START	0xaa	// I2C start command stream
-#define UCHEPP_CMD_I2C_STM_END	0x00	// I2C end command stream
-#define UCHEPP_CMD_I2C_STA	0x74	// I2C interface START condition
-#define UCHEPP_CMD_I2C_STO	0x75	// I2C interface STOP condition
-#define UCHEPP_CMD_I2C_OUT	0x80	// I2C interface write
-#define UCHEPP_CMD_I2C_IN	0xc0	// I2C interface read
-#define UCHEPP_CMD_I2C_SET	0x60	// I2C interface set speed
+#define UCHEPP_CMD_I2C_STM_START	0xaa // I2C start command stream
+#define UCHEPP_CMD_I2C_STM_END	0x00 // I2C end command stream
+#define UCHEPP_CMD_I2C_STA	0x74 // I2C interface START condition
+#define UCHEPP_CMD_I2C_STO	0x75 // I2C interface STOP condition
+#define UCHEPP_CMD_I2C_OUT	0x80 // I2C interface write
+#define UCHEPP_CMD_I2C_IN	0xc0 // I2C interface read
+#define UCHEPP_CMD_I2C_SET	0x60 // I2C interface set speed
 
 
 /* I2C related protocol constants */
@@ -42,7 +42,6 @@
 #define UCHEPP_I2C_SPEED_100KHZ	1
 #define UCHEPP_I2C_SPEED_400KHZ	2
 #define UCHEPP_I2C_SPEED_750KHZ	3
-
 
 
 void

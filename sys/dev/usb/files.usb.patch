@@ -13,7 +13,6 @@ diff -u -r1.186 files.usb
 +device	uchepp: gpiobus
 +attach	uchepp at usbdevif
 +file	dev/usb/uchepp.c		uchepp
-+file	dev/usb/uchepp_usb.c	uchepp
 +file	dev/usb/uchepp_gpio.c	uchepp
 +file	dev/usb/uchepp_iic.c	uchepp
 +

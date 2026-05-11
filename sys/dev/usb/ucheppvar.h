@@ -33,45 +33,43 @@
 #include <dev/gpio/gpiovar.h>
 #include <dev/i2c/i2cvar.h>
 
-#define UCHEPP_DEBUG	/* XXX */
+#define UCHEPP_DEBUG /* XXX */
 
-#define UCHEPP_NUM_GPIO_LINES		19
+#define UCHEPP_NUM_GPIO_LINES 19
 
-struct uchepp_softc {
-	device_t			sc_dev;
-	struct usbd_device	*sc_udev;
+struct uchepp_softc
+{
+	device_t sc_dev;
+	struct usbd_device *sc_udev;
 
-	bool			sc_dying;
-	kmutex_t			sc_lock;
-	uint8_t			sc_version;
+	bool sc_dying;
+	kmutex_t sc_lock;
+	uint8_t sc_version;
 
 	/* Data bulk-in, bulk-out, interrupt endpoints */
-	struct usbd_pipe		*sc_bin_pipe;
-	struct usbd_pipe		*sc_bout_pipe;
-	struct usbd_pipe		*sc_intr_pipe;
-	uint8_t			sc_bin_pipe_maxsize;
-	uint8_t			sc_bout_pipe_maxsize;
-	uint8_t			sc_intr_pipe_maxsize;
+	struct usbd_pipe *sc_bin_pipe;
+	struct usbd_pipe *sc_bout_pipe;
+	struct usbd_pipe *sc_intr_pipe;
+	uint8_t sc_bin_pipe_maxsize;
+	uint8_t sc_bout_pipe_maxsize;
+	uint8_t sc_intr_pipe_maxsize;
 
 	/* Preallocated DMA buffers and data xfers */
-	struct usbd_xfer		*sc_bin_xfer;
-	struct usbd_xfer		*sc_bout_xfer;
-	struct usbd_xfer		*sc_intr_xfer;
+	struct usbd_xfer *sc_bin_xfer;
+	struct usbd_xfer *sc_bout_xfer;
+	struct usbd_xfer *sc_intr_xfer;
 
 	/* GPIO functionality, pins softstate (hw doesn't maintain dirs config) */
-	struct gpio_chipset_tag	sc_gpio_gc;
-	gpio_pin_t		sc_gpio_pins[UCHEPP_NUM_GPIO_LINES];
-	device_t			sc_gpio_dev;
-	uint8_t			sc_gpio_hw_dir_mask; // dir settings for D[5:0]
-	uint8_t			sc_gpio_hw_out_mask; // val settings for out pins
+	struct gpio_chipset_tag sc_gpio_gc;
+	gpio_pin_t sc_gpio_pins[UCHEPP_NUM_GPIO_LINES];
+	device_t sc_gpio_dev;
+	uint8_t sc_gpio_hw_dir_mask; // dir settings for D[5:0]
+	uint8_t sc_gpio_hw_out_mask; // val settings for out pins
 
 };
 
-int	uchepp_usb_init(struct uchepp_softc *);
-void	uchepp_usb_fini(struct uchepp_softc *);
-int	uchepp_usb_bulk_send(struct uchepp_softc *, void *, size_t);
-int	uchepp_usb_bulk_recv(struct uchepp_softc *, void *, size_t);
-int	uchepp_usb_req_vendor_read(struct uchepp_softc *, uint8_t, void *, size_t);
+int uchepp_usb_bulk_send(struct uchepp_softc *, void *, size_t);
+int uchepp_usb_bulk_recv(struct uchepp_softc *, void *, size_t);
 
-void	uchepp_gpio_attach(struct uchepp_softc*);
-void	uchepp_iic_attach(struct uchepp_softc*);
+void uchepp_gpio_attach(struct uchepp_softc *);
+void uchepp_iic_attach(struct uchepp_softc *);
