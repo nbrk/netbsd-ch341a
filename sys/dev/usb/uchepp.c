@@ -28,6 +28,7 @@
 #include <dev/usb/ucheppvar.h>
 
 #include <sys/module.h>
+#include <sys/kmem.h>
 
 #include <dev/usb/usbdevs.h>
 #include <dev/usb/usbdi.h>
@@ -40,6 +41,11 @@
 #define UCHEPP_CTRL_IN_BUF_SIZE 8
 
 #define UCHEPP_REQ_GET_VERSION 0x5f
+
+struct uchepp_usb_send_async_ctx {
+	struct uchepp_softc *sc;
+	void *buf;
+};
 
 static int uchepp_usb_find_connect_endpoints(struct uchepp_softc *sc);
 static int uchepp_usb_init(struct uchepp_softc *);
@@ -95,12 +101,10 @@ uchepp_usb_find_connect_endpoints(struct uchepp_softc *sc)
 		if ((UE_GET_XFERTYPE(epdesc->bmAttributes) == UE_BULK) &&
 		    (UE_GET_DIR(epdesc->bEndpointAddress) == UE_DIR_IN) &&
 		    !sc->sc_bin_pipe) {
-			sc->sc_bin_pipe_maxsize =
-			    UGETW(epdesc->wMaxPacketSize);
+			sc->sc_bulk_pipe_maxsize = UGETW(epdesc->wMaxPacketSize);
 			err =
 			    usbd_open_pipe(iface, epdesc->bEndpointAddress,
-			    USBD_EXCLUSIVE_USE | USBD_MPSAFE,
-			    &sc->sc_bin_pipe);
+			    USBD_EXCLUSIVE_USE | USBD_MPSAFE, &sc->sc_bin_pipe);
 			if (err) {
 				aprint_error_dev(sc->sc_dev,
 				    "failed to open bulk-in pipe: %s\n",
@@ -110,13 +114,11 @@ uchepp_usb_find_connect_endpoints(struct uchepp_softc *sc)
 			epaddrs[0] = epdesc->bEndpointAddress;
 		} else if ((UE_GET_XFERTYPE(epdesc->bmAttributes) == UE_BULK)
 		    && (UE_GET_DIR(epdesc->bEndpointAddress) == UE_DIR_OUT)
-		    && !sc->sc_bout_pipe) {
-			sc->sc_bout_pipe_maxsize =
+		    && !sc->sc_bout_pipe) { sc->sc_bulk_pipe_maxsize =
 			    UGETW(epdesc->wMaxPacketSize);
 			err =
 			    usbd_open_pipe(iface, epdesc->bEndpointAddress,
-			    USBD_EXCLUSIVE_USE | USBD_MPSAFE,
-			    &sc->sc_bout_pipe);
+			    USBD_EXCLUSIVE_USE | USBD_MPSAFE, &sc->sc_bout_pipe);
 			if (err) {
 				aprint_error_dev(sc->sc_dev,
 				    "failed to open bulk-out pipe: %s\n",
@@ -164,8 +166,8 @@ uchepp_usb_find_connect_endpoints(struct uchepp_softc *sc)
 #ifdef UCHEPP_DEBUG
 	aprint_normal_dev(sc->sc_dev,
 	    "bulk-in 0x%.2x(%d), bulk-out 0x%.2x(%d), interrupt 0x%.2x(%d)\n",
-	    epaddrs[0], sc->sc_bin_pipe_maxsize, epaddrs[1],
-	    sc->sc_bout_pipe_maxsize, epaddrs[2], sc->sc_intr_pipe_maxsize);
+	    epaddrs[0], sc->sc_bulk_pipe_maxsize, epaddrs[1],
+	    sc->sc_bulk_pipe_maxsize, epaddrs[2], sc->sc_intr_pipe_maxsize);
 #endif
 
 	return 0;
@@ -186,33 +188,33 @@ uchepp_usb_init(struct uchepp_softc *sc)
 		return -1;
 	}
 
-	// Find all three endpoints, query data sizes, open pipes
+	// Find all endpoints, query data sizes, open pipes
 	if (uchepp_usb_find_connect_endpoints(sc)) {
 		aprint_error_dev(sc->sc_dev,
 		    "failed to find or connect endpoints\n");
 		return -1;
 	}
 
-	/*
-	 * Create usbd_xfer objects, each allocating a nice DMA-compatible buffer
-	 * capable of holding the endpoint's maximum packet size. We reuse it.
-	 */
-	if (usbd_create_xfer(sc->sc_bin_pipe, sc->sc_bin_pipe_maxsize, 0, 0,
+	// create transfers and pre-allocate buffers for sync operations
+	if (usbd_create_xfer(sc->sc_bin_pipe, sc->sc_bulk_pipe_maxsize, 0, 0,
 		&sc->sc_bin_xfer)) {
-		aprint_error_dev(sc->sc_dev,
-		    "failed to create data-in xfer\n");
+		aprint_error_dev(sc->sc_dev, "failed to create data-in xfer\n");
 		return -1;
 	}
-	if (usbd_create_xfer(sc->sc_bout_pipe, sc->sc_bout_pipe_maxsize, 0, 0,
-		&sc->sc_bout_xfer)) {
-		aprint_error_dev(sc->sc_dev,
-		    "failed to create data-out xfer\n");
+	if (usbd_create_xfer(sc->sc_bout_pipe, sc->sc_bulk_pipe_maxsize, 0, 0,
+	        &sc->sc_bout_sync_xfer)) {
+		aprint_error_dev(sc->sc_dev, "failed to create data-out xfer\n");
 		return -1;
 	}
 	if (usbd_create_xfer(sc->sc_intr_pipe, sc->sc_intr_pipe_maxsize, 0, 0,
 		&sc->sc_intr_xfer)) {
-		aprint_error_dev(sc->sc_dev,
-		    "failed to create intr-in xfer\n");
+		aprint_error_dev(sc->sc_dev, "failed to create intr-in xfer\n");
+		return -1;
+	}
+	// create dedicated xfer for async writes; do not alloc any static buf
+	if (usbd_create_xfer(sc->sc_bout_pipe, sc->sc_bulk_pipe_maxsize, 0, 0,
+	        &sc->sc_bout_async_xfer)) {
+		aprint_error_dev(sc->sc_dev, "failed to create async data-out xfer\n");
 		return -1;
 	}
 
@@ -237,38 +239,95 @@ uchepp_usb_fini(struct uchepp_softc *sc)
 	}
 	if (sc->sc_bin_xfer)
 		usbd_destroy_xfer(sc->sc_bin_xfer);
-	if (sc->sc_bout_xfer)
-		usbd_destroy_xfer(sc->sc_bout_xfer);
+	if (sc->sc_bout_sync_xfer)
+		usbd_destroy_xfer(sc->sc_bout_sync_xfer);
+	if (sc->sc_bout_async_xfer)
+		usbd_destroy_xfer(sc->sc_bout_async_xfer);
 	if (sc->sc_intr_xfer)
 		usbd_destroy_xfer(sc->sc_intr_xfer);
 
 	(void) usbd_close_pipe(sc->sc_bin_pipe);
 	(void) usbd_close_pipe(sc->sc_bout_pipe);
+	(void) usbd_close_pipe(sc->sc_intr_pipe);
 }
 
 int
-uchepp_usb_bulk_send(struct uchepp_softc *sc, void *buf, size_t bsiz)
+uchepp_usb_bulk_send_sync(struct uchepp_softc *sc, void *buf, size_t bsiz)
 {
-
 	usbd_status err;
 	uint32_t n;
-	void *const realbuf = usbd_get_buffer(sc->sc_bout_xfer);
+	void *realbuf;
 
-	if (bsiz > sc->sc_bout_pipe_maxsize) {
-		aprint_error_dev(sc->sc_dev,
-		    "bulk-out buffer exceeds %d bytes",
-		    sc->sc_bout_pipe_maxsize);
+	if (bsiz > sc->sc_bulk_pipe_maxsize) {
+		aprint_error_dev(sc->sc_dev, "bulk-out buffer exceeds %d bytes",
+		    sc->sc_bulk_pipe_maxsize);
 		return -1;
 	}
+
+	// mutex_enter(&sc->sc_lock);
+
+	realbuf = usbd_get_buffer(sc->sc_bout_sync_xfer);
 
 	memcpy(realbuf, buf, bsiz);
 
 	n = bsiz;
-	err = usbd_bulk_transfer(sc->sc_bout_xfer, sc->sc_bout_pipe,
+	err = usbd_bulk_transfer(sc->sc_bout_sync_xfer, sc->sc_bout_pipe,
 	    0, USBD_DEFAULT_TIMEOUT, realbuf, &n);
+	// mutex_exit(&sc->sc_lock); // we are done after usbd_bulk_transfer()
 	if (err) {
-		aprint_error_dev(sc->sc_dev,
-		    "bulk-out xfer failed: %s\n", usbd_errstr(err));
+		aprint_error_dev(sc->sc_dev, "bulk-out xfer failed: %s\n",
+		                 usbd_errstr(err));
+		return -1;
+	}
+
+	return 0;
+}
+
+static void
+uchepp_usb_bulk_send_done(struct usbd_xfer *xfer, void *priv, usbd_status err) {
+	struct uchepp_usb_send_async_ctx *ctx = priv;
+	struct uchepp_softc *sc = ctx->sc;
+
+	if (err) {
+		aprint_error_dev(sc->sc_dev, "async send failed: %s\n",
+		                 usbd_errstr(err));
+		goto free_mem;
+	}
+
+free_mem:
+	kmem_intr_free(ctx->buf, sc->sc_bulk_pipe_maxsize);
+	kmem_intr_free(ctx, sizeof *ctx);
+}
+
+int
+uchepp_usb_bulk_send_async(struct uchepp_softc *sc, void *buf, size_t bsiz) {
+	struct uchepp_usb_send_async_ctx *ctx;
+	usbd_status err;
+
+	if (bsiz > sc->sc_bulk_pipe_maxsize) {
+		aprint_error_dev(sc->sc_dev, "bulk-out buffer exceeds %d bytes",
+		    sc->sc_bulk_pipe_maxsize);
+		return -1;
+	}
+
+	ctx = kmem_intr_zalloc(sizeof *ctx, KM_NOSLEEP);
+	ctx->sc = sc;
+	ctx->buf = kmem_intr_zalloc(sc->sc_bulk_pipe_maxsize, KM_NOSLEEP);
+
+	memcpy(ctx->buf, buf, bsiz);
+
+	// mutex_enter(&sc->sc_lock);
+	usbd_setup_xfer(sc->sc_bout_async_xfer, ctx, ctx->buf, bsiz, 0,
+	                USBD_DEFAULT_TIMEOUT, uchepp_usb_bulk_send_done);
+
+	err = usbd_transfer(sc->sc_bout_async_xfer);
+	// mutex_exit(&sc->sc_lock); // we are done after usbd_transfer() submission
+
+	if (err != USBD_NORMAL_COMPLETION && err != USBD_IN_PROGRESS) {
+		aprint_error_dev(sc->sc_dev, "failed to dispatch async send: %s\n",
+		                 usbd_errstr(err));
+		kmem_intr_free(ctx->buf, sc->sc_bulk_pipe_maxsize);
+		kmem_intr_free(ctx, sizeof *ctx);
 		return -1;
 	}
 
@@ -280,26 +339,34 @@ uchepp_usb_bulk_recv(struct uchepp_softc *sc, void *buf, size_t bsiz)
 {
 	usbd_status err;
 	uint32_t n;
-	void *const realbuf = usbd_get_buffer(sc->sc_bin_xfer);
+	void *realbuf;
+	int ret;
 
-	if (bsiz > sc->sc_bin_pipe_maxsize) {
+	if (bsiz > sc->sc_bulk_pipe_maxsize) {
 		aprint_error_dev(sc->sc_dev, "bulk-in buffer exceeds %d bytes",
-		    sc->sc_bin_pipe_maxsize);
+		    sc->sc_bulk_pipe_maxsize);
 		return -1;
 	}
+
+	// mutex_enter(&sc->sc_lock);
+
+	realbuf = usbd_get_buffer(sc->sc_bin_xfer);
 
 	n = bsiz;
-	err = usbd_bulk_transfer(sc->sc_bin_xfer, sc->sc_bout_pipe,
-	    0, USBD_DEFAULT_TIMEOUT, realbuf, &n);
+	err = usbd_bulk_transfer(sc->sc_bin_xfer, sc->sc_bin_pipe, 0,
+	                         USBD_DEFAULT_TIMEOUT, realbuf, &n);
 	if (err) {
-		aprint_error_dev(sc->sc_dev,
-		    "bulk-in xfer failed: %s\n", usbd_errstr(err));
-		return -1;
+		aprint_error_dev(sc->sc_dev, "bulk-in xfer failed: %s\n",
+		                 usbd_errstr(err));
+		ret = -1;
+	} else {
+		memcpy(buf, realbuf, bsiz);
+		ret = 0;
 	}
 
-	memcpy(buf, realbuf, bsiz);
+	// mutex_exit(&sc->sc_lock); // we've to protect memcpy() with realbuf above
 
-	return 0;
+	return ret;
 }
 
 int
@@ -377,6 +444,7 @@ uchepp_attach(device_t parent, device_t self, void *aux)
 	sc->sc_dev = self;
 	sc->sc_udev = uaa->uaa_device;
 	sc->sc_dying = false;
+	sc->sc_attached = false;
 	mutex_init(&sc->sc_lock, MUTEX_DEFAULT, IPL_NONE);
 
 	/*
@@ -401,6 +469,7 @@ uchepp_attach(device_t parent, device_t self, void *aux)
 
 	uchepp_gpio_attach(sc);
 
+	sc->sc_attached = true;
 }
 
 static int

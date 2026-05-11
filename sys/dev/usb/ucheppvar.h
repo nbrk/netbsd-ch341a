@@ -43,6 +43,7 @@ struct uchepp_softc
 	struct usbd_device *sc_udev;
 
 	bool sc_dying;
+	bool sc_attached;
 	kmutex_t sc_lock;
 	uint8_t sc_version;
 
@@ -50,13 +51,13 @@ struct uchepp_softc
 	struct usbd_pipe *sc_bin_pipe;
 	struct usbd_pipe *sc_bout_pipe;
 	struct usbd_pipe *sc_intr_pipe;
-	uint8_t sc_bin_pipe_maxsize;
-	uint8_t sc_bout_pipe_maxsize;
+	uint8_t sc_bulk_pipe_maxsize;
 	uint8_t sc_intr_pipe_maxsize;
 
-	/* Preallocated DMA buffers and data xfers */
+	/* Transfers' descriptions  */
 	struct usbd_xfer *sc_bin_xfer;
-	struct usbd_xfer *sc_bout_xfer;
+	struct usbd_xfer *sc_bout_sync_xfer;
+	struct usbd_xfer *sc_bout_async_xfer;
 	struct usbd_xfer *sc_intr_xfer;
 
 	/* GPIO functionality, pins softstate (hw doesn't maintain dirs config) */
@@ -68,7 +69,8 @@ struct uchepp_softc
 
 };
 
-int uchepp_usb_bulk_send(struct uchepp_softc *, void *, size_t);
+int uchepp_usb_bulk_send_sync(struct uchepp_softc *, void *, size_t);
+int uchepp_usb_bulk_send_async(struct uchepp_softc *, void *, size_t);
 int uchepp_usb_bulk_recv(struct uchepp_softc *, void *, size_t);
 
 void uchepp_gpio_attach(struct uchepp_softc *);

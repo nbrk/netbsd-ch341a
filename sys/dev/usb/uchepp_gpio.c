@@ -98,6 +98,7 @@ static void
 set_pins_dirs_outs(struct uchepp_softc *sc, uint8_t dirmask, uint8_t outmask)
 {
 	uint8_t buf[4];
+	int err;
 
 	// ensure only D[5:0] bits are used
 	dirmask &= ~0xc0;
@@ -108,9 +109,11 @@ set_pins_dirs_outs(struct uchepp_softc *sc, uint8_t dirmask, uint8_t outmask)
 	buf[2] = UCHEPP_CMD_UIO_OUT | outmask;
 	buf[3] = UCHEPP_CMD_UIO_STM_END;
 
-	if (uchepp_usb_bulk_send(sc, buf, 4)) {
-		aprint_error_dev(sc->sc_dev,
-		    "failed to set pins dirs and outs\n");
+	// enable async outputs only after the autoconfiguration is done
+	err = sc->sc_attached ? uchepp_usb_bulk_send_async(sc, buf, 4)
+	                      : uchepp_usb_bulk_send_sync(sc, buf, 4);
+	if (err) {
+		aprint_error_dev(sc->sc_dev, "failed to set pins dirs and outs\n");
 		// NOTE: pins' softstate is left intact on failure
 		return;
 	}
@@ -157,12 +160,11 @@ pin_read(void *arg, int pin)
 	struct uchepp_softc *sc = arg;
 	int ret;
 
-	mutex_enter(&sc->sc_lock);
-
 #ifdef UCHEPP_DEBUG
 	aprint_normal_dev(sc->sc_dev, "%s for pin %d\n", __FUNCTION__, pin);
 #endif
 
+	mutex_enter(&sc->sc_lock);
 	if (pin < UCHEPP_NUM_D_BIDIR_LINES
 	    && (sc->sc_gpio_hw_dir_mask & (1 << pin))) {
 		/*
@@ -182,16 +184,16 @@ pin_read(void *arg, int pin)
 		int value;
 
 		buf[0] = UCHEPP_CMD_PARA_STATUS;
-		if (uchepp_usb_bulk_send(sc, buf, 1)) {
-			aprint_error_dev(sc->sc_dev,
-			    "failed to send cmd 0x%.2x\n", buf[0]);
-			ret = -1;
-		}
+		if (uchepp_usb_bulk_send_sync(sc, buf, 1)) {
+			aprint_error_dev(sc->sc_dev, "failed to send cmd 0x%.2x\n",
+			                 buf[0]);
+			goto failed;
 
+		}
 		if (uchepp_usb_bulk_recv(sc, buf, 6)) {
 			aprint_error_dev(sc->sc_dev,
-			    "failed to receive pins statuses\n");
-			ret = -1;
+			                 "failed to receive pins statuses\n");
+			goto failed;
 		}
 
 		value = (buf[pinbyteidx] & (1 << pinbyteoff)) ? GPIO_PIN_HIGH
@@ -202,12 +204,15 @@ pin_read(void *arg, int pin)
 		    pin, pinbyteidx, pinbyteoff, value, buf[3], buf[2], buf[1],
 		    buf[0]);
 #endif
-
 		ret = value;
 	}
 
 	mutex_exit(&sc->sc_lock);
 	return ret;
+
+failed:
+	mutex_exit(&sc->sc_lock);
+	return -1;
 }
 
 static void
@@ -215,11 +220,12 @@ pin_write(void *arg, int pin, int value)
 {
 	struct uchepp_softc *sc = arg;
 
-	mutex_enter(&sc->sc_lock);
 #ifdef UCHEPP_DEBUG
 	aprint_normal_dev(sc->sc_dev, "%s for pin %d, value %d\n",
 	    __FUNCTION__, pin, value);
 #endif
+
+	mutex_enter(&sc->sc_lock);
 
 	/* Only D[5:0] may be in the output mode */
 	if (pin < UCHEPP_NUM_D_BIDIR_LINES) {
@@ -262,12 +268,13 @@ static void
 pin_ctl(void *arg, int pin, int flags)
 {
 	struct uchepp_softc *sc = arg;
-	mutex_enter(&sc->sc_lock);
 
 #ifdef UCHEPP_DEBUG
 	aprint_normal_dev(sc->sc_dev, "%s for pin %d, flags 0x%.8x\n",
 	    __FUNCTION__, pin, flags);
 #endif
+
+	mutex_enter(&sc->sc_lock);
 
 	/* Only D[5:0] are allowed for real manipulation */
 	if (pin < UCHEPP_NUM_D_BIDIR_LINES) {
