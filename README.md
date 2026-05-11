@@ -33,5 +33,5 @@ or compile and load the module in `sys/modules/uchepp`.
 # TODO
 - Support of the I2C functionality
 - Support of the hardware interrupt (the `#INTR` line)
-- Asynchronous USB transfers, so `gpiopwm(4)` won't block in `callout(9)`
+- ~Asynchronous USB transfers, so gpiopwm(4) won't block in callout(9)~
 - Explore chip's comms protocol, refine interaction with the hardware
